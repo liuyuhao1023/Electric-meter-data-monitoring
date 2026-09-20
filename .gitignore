@@ -1,0 +1,30 @@
+# Python bytecode and virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# Runtime Persistence & Private Config Files (DO NOT COMMIT)
+backend/chargers.json
+backend/chargers_state.json
+backend/chargers_records.json
+backend/webhook_settings.json
+backend/secrets.json
+backend/alarm_config.json
+backend/alarms.json
+backend/energy_stats.json
+backend/service_logs.json
+backend/temp_*.json
+
+# Archives & Logs
+*.zip
+*.tar.gz
+*.log
+
+# IDE & OS Metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>380V 智能电表监控系统</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+    <div class="background-mesh"></div>
+    
+    <div class="app-container">
+        <header>
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                <h1>智能电表监控中心</h1>
+            </div>
+            <div class="status-indicator">
+                <div class="led" id="connection-led"></div>
+                <span id="connection-text">连接中...</span>
+            </div>
+        </header>
+
+        <main class="dashboard-layout">
+            <!-- Sidebar Navigation -->
+            <aside class="app-sidebar">
+                <div class="nav-section">
+                    <h3>⚡ 充电桩监控</h3>
+                    <ul class="nav-list">
+                        <li class="nav-item active" data-view="view-charger-a">A枪充电桩</li>
+                        <li class="nav-item" data-view="view-charger-b">B枪充电桩</li>
+                        <li class="nav-item" data-view="view-charger-mid">三号充电桩</li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>📊 数据中心</h3>
+                    <ul class="nav-list">
+                        <li class="nav-item" data-view="view-global-dashboard">🌟 大盘总览</li>
+                        <li class="nav-item" data-view="view-meter-management">📋 电表管理</li>
+                        <li class="nav-item" data-view="view-alarms">🚨 告警中心</li>
+                        <li class="nav-item" data-view="view-energy-stats">📈 能耗统计</li>
+                        <li class="nav-item" data-view="view-serial-servers">🌐 串口服务器管理</li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>⚙️ 系统设置</h3>
+                    <ul class="nav-list">
+                        <li class="nav-item" data-view="view-settings-conn">连接与调试</li>
+                        <li class="nav-item" data-view="view-settings-push">推送设置</li>
+                        <li class="nav-item" data-view="view-settings-alarm">告警设置</li>
+                        <li class="nav-item" data-view="view-settings-admin">管理员设置</li>
+                    </ul>
+                </div>
+            </aside>
+
+            <div class="main-content">
+            
+            <!-- VIEW: Global Dashboard -->
+            <div class="view-container" id="view-global-dashboard" style="display: none;">
+                <section class="panel glass">
+                    <h2>🌟 大盘总览</h2>
+                    <p class="subtitle">全站核心运作指标实时大屏监控</p>
+                    <div class="form-grid" style="margin-top: 1.5rem; gap: 1.5rem;">
+                        <div class="input-group" style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); text-align: center;">
+                            <h3 style="color: var(--text-muted); font-size: 1.1rem; margin-bottom: 0.5rem;">⚡ 全站实时总功率</h3>
+                            <div style="font-size: 2.5rem; font-weight: bold; color: var(--primary); text-shadow: 0 0 10px rgba(0,242,254,0.3);" id="global-total-power">0.00 <span style="font-size: 1.2rem;">kW</span></div>
+                        </div>
+                        <div class="input-group" style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); text-align: center;">
+                            <h3 style="color: var(--text-muted); font-size: 1.1rem; margin-bottom: 0.5rem;">🔋 今日全站总用电量</h3>
+                            <div style="font-size: 2.5rem; font-weight: bold; color: var(--success); text-shadow: 0 0 10px rgba(76,175,80,0.3);" id="global-today-energy">0.00 <span style="font-size: 1.2rem;">kWh</span></div>
+                        </div>
+                    </div>
+                    <div class="form-grid" style="margin-top: 1.5rem; gap: 1.5rem;">
+                        <div class="input-group" style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); text-align: center;">
+                            <h3 style="color: var(--text-muted); font-size: 1.1rem; margin-bottom: 0.5rem;">🌐 设备网络状态</h3>
+                            <div style="font-size: 1.5rem; font-weight: bold;" id="global-network-status">
+                                <span style="color: var(--success);">🟢 3 在线</span> / <span style="color: var(--error);">🔴 0 离线</span>
+                            </div>
+                        </div>
+                        <div class="input-group" style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); text-align: center;">
+                            <h3 style="color: var(--text-muted); font-size: 1.1rem; margin-bottom: 0.5rem;">🚗 充电工作状态</h3>
+                            <div style="font-size: 1.5rem; font-weight: bold;" id="global-charging-status">
+                                <span style="color: var(--warning);">⚡ 0 正在充电</span> / <span style="color: var(--text-main);">⚪ 3 空闲待机</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 2rem;">
+                        <h3 style="color: var(--primary); margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem;">📊 充电统计</h3>
+                        <div class="table-container" style="overflow-x: auto;">
+                            <table class="records-table" style="white-space: nowrap; width: 100%;">
+                                <thead>
+                                    <tr>
+                                        <th>充值时间</th>
+                                        <th>充电桩</th>
+                                        <th>充值金额 (元)</th>
+                                        <th>用电量 (kWh)</th>
+                                        <th>结束时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="global-records-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style="display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1rem;">
+                            <button id="global-records-prev" class="btn-secondary" style="padding: 0.2rem 0.8rem; font-size: 0.9rem;" disabled>上一页</button>
+                            <span id="global-records-page-info" style="font-size: 0.9rem; color: var(--text-muted);">第 1 页</span>
+                            <button id="global-records-next" class="btn-secondary" style="padding: 0.2rem 0.8rem; font-size: 0.9rem;" disabled>下一页</button>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 2rem;">
+                        <h3 style="color: var(--primary); margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem;">📡 爬虫抓取服务日志</h3>
+                        <div class="table-container" style="overflow-x: auto; max-height: 250px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+                            <table class="records-table" style="white-space: nowrap; width: 100%; font-family: monospace; font-size: 0.9rem;">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 180px;">时间</th>
+                                        <th style="width: 150px;">设备名称</th>
+                                        <th style="width: 100px;">状态</th>
+                                        <th>详情描述</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="service-logs-body">
+                                    <!-- Populated by JS -->
+                                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">正在加载日志...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <!-- VIEW: Alarms Center -->
+            <div class="view-container" id="view-alarms" style="display: none;">
+                <section class="panel glass">
+                    <div style="margin-bottom: 1rem;">
+                        <h2>🚨 告警中心</h2>
+                        <p class="subtitle">实时监控设备异常物理参数与网络状态</p>
+                    </div>
+                    <div class="table-container" style="overflow-x: auto; max-height: 60vh;">
+                        <table class="records-table" style="white-space: nowrap;">
+                            <thead>
+                                <tr>
+                                    <th>时间</th>
+                                    <th>设备名称</th>
+                                    <th>告警类型</th>
+                                    <th>级别</th>
+                                    <th>触发数值</th>
+                                    <th>详情描述</th>
+                                </tr>
+                            </thead>
+                            <tbody id="alarms-table-body">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- VIEW: Energy Stats -->
+            <div class="view-container" id="view-energy-stats" style="display: none;">
+                <div style="margin-bottom: 1.5rem;">
+                    <h2>📈 运营级能耗控制台</h2>
+                    <p class="subtitle">实时跟踪各电表能耗表现与逐日结算明细</p>
+                </div>
+
+                <!-- 3-Column Layout Container -->
+                <div id="energy-columns-wrapper" style="display: flex; gap: 1.5rem; overflow-x: auto; align-items: stretch; padding-bottom: 1rem;">
+                    <!-- Columns will be injected by JS to match the drawing -->
+                </div>
+            </div>
+
+            <!-- VIEW: Middle Charger -->
+            <div class="view-container" id="view-charger-mid" style="display: none;">
+            <section class="panel data-panel glass">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h2 style="display: flex; align-items: center; gap: 0.5rem;">
+                        实时数据
+                        <span class="ct-badge" style="display: none; font-size: 0.8rem; background: var(--secondary); color: white; padding: 2px 8px; border-radius: 12px; font-weight: normal;">已启用 20 倍互感器换算</span>
+                    </h2>
+                    <div class="status-indicator" style="background: rgba(0,0,0,0.4);">
+                        <div class="led charging-led"></div>
+                        <span class="charging-text">待机中</span>
+                    </div>
+                </div>
+                <p class="subtitle">当前读取 DL/T645 电表地址: <span class="display-start">尚未连接</span></p>
+                
+                <div class="data-grid"></div>
+                
+                <div class="empty-state">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill"></div>
+                    </div>
+                    <p style="margin-top: 1rem; font-size: 1.1rem; color: var(--primary);">正在连接电表获取数据...</p>
+                    <p class="small" style="color: #4CAF50;">如果长时间未显示，请检查连接设置</p>
+                </div>
+            </section>
+
+            <section class="panel records-panel glass">
+                <h2>历史充电账单</h2>
+                <p class="subtitle">系统自动根据电流检测记录的充电耗电量</p>
+                <div class="table-container">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>开始时间</th>
+                                <th>结束时间</th>
+                                <th>消耗电量 (kWh)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="records-body"></tbody>
+                    </table>
+                </div>
+            </section>
+            </div>
+            
+            <!-- VIEW: B Charger -->
+            <div class="view-container" id="view-charger-b" style="display: none;">
+            <section class="panel data-panel glass">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h2 style="display: flex; align-items: center; gap: 0.5rem;">
+                        实时数据
+                        <span class="ct-badge" style="display: none; font-size: 0.8rem; background: var(--secondary); color: white; padding: 2px 8px; border-radius: 12px; font-weight: normal;">已启用 20 倍互感器换算</span>
+                    </h2>
+                    <div class="status-indicator" style="background: rgba(0,0,0,0.4);">
+                        <div class="led charging-led"></div>
+                        <span class="charging-text">待机中</span>
+                    </div>
+                </div>
+                <p class="subtitle">当前读取 DL/T645 电表地址: <span class="display-start">尚未连接</span></p>
+                
+                <div class="data-grid"></div>
+                
+                <div class="empty-state">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill"></div>
+                    </div>
+                    <p style="margin-top: 1rem; font-size: 1.1rem; color: var(--primary);">正在连接电表获取数据...</p>
+                    <p class="small" style="color: #4CAF50;">如果长时间未显示，请检查连接设置</p>
+                </div>
+            </section>
+
+            <section class="panel records-panel glass">
+                <h2>历史充电账单</h2>
+                <p class="subtitle">系统自动根据电流检测记录的充电耗电量</p>
+                <div class="table-container">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>开始时间</th>
+                                <th>结束时间</th>
+                                <th>消耗电量 (kWh)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="records-body"></tbody>
+                    </table>
+                </div>
+            </section>
+            </div>
+            
+            <!-- VIEW: Connection Settings -->
+            <div class="view-container" id="view-settings-conn" style="display: none;">
+            <section class="panel settings-panel glass" id="config-cards-container">
+                <h2>连接与调试设置</h2>
+                <p class="subtitle">管理所有的充电桩串口服务器连接。点击增加按钮添加新的连接。</p>
+                <div id="charger-forms-wrapper" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
+                    <!-- Forms injected via JS -->
+                </div>
+                <button id="add-charger-btn" class="btn-primary" style="margin-top: 1rem; width: 100%; background: rgba(0, 240, 255, 0.2); color: var(--primary);">+ 增加充电桩连接</button>
+            </section>
+            </div>
+
+            <!-- VIEW: Meter Management -->
+            <div class="view-container" id="view-meter-management" style="display: none;">
+                <section class="panel glass">
+                    <h2>📋 电表管理台账</h2>
+                    <p class="subtitle">全方位总览和管理所有智能电表参数与实时状态</p>
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table class="records-table" style="white-space: nowrap;">
+                            <thead>
+                                <tr>
+                                    <th>设备名称</th>
+                                    <th>安装位置</th>
+                                    <th>SN码</th>
+                                    <th>通讯地址</th>
+                                    <th>协议</th>
+                                    <th>状态</th>
+                                    <th>最后更新时间</th>
+                                    <th>备注</th>
+                                </tr>
+                            </thead>
+                            <tbody id="meter-table-body">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- VIEW: Serial Servers -->
+            <div class="view-container" id="view-serial-servers" style="display: none;">
+                <section class="panel glass">
+                    <h2>🌐 串口服务器管理</h2>
+                    <p class="subtitle">实时监控所有串口服务器的网络连接状态和配置信息</p>
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table class="records-table" style="white-space: nowrap;">
+                            <thead>
+                                <tr>
+                                    <th>服务器 IP</th>
+                                    <th>端口</th>
+                                    <th>设备类别</th>
+                                    <th>串口参数 (波特率,数据位,停止位,校验)</th>
+                                    <th>关联设备</th>
+                                    <th>网络状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="serial-servers-table-body">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- VIEW: Push Settings -->
+            <div class="view-container" id="view-settings-push" style="display: none;">
+            <section class="panel settings-panel glass" id="webhook-panel">
+                <h2>企业微信推送设置</h2>
+                <p class="subtitle">独立配置计费与运维通道的企业微信消息分发引擎。</p>
+                
+                <h3 style="margin-top: 1rem; color: var(--primary);">🔋 计费对账推送 (充电开启、结束账单)</h3>
+                <div class="form-grid" style="margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 1.5rem;">
+                    <div class="input-group" style="flex: 2;">
+                        <label for="webhook-charge-key">Webhook Token (财务计费群)</label>
+                        <input type="text" id="webhook-charge-key" placeholder="xxxxxxxx-xxxx-xxxx-xxxxxxxx" readonly style="cursor: pointer;" title="点击修改 Token">
+                    </div>
+                    <div class="input-group" style="align-items: flex-end;">
+                        <label style="margin-bottom: 0.6rem;">推送开关</label>
+                        <label class="toggle-switch" id="webhook-charge-toggle-label">
+                            <input type="checkbox" id="webhook-charge-toggle">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-text" id="webhook-charge-toggle-text">已开启</span>
+                        </label>
+                    </div>
+                </div>
+
+                <h3 style="color: var(--warning);">🚨 技术运维推送 (设备离线、过压等异常)</h3>
+                <div class="form-grid">
+                    <div class="input-group" style="flex: 2;">
+                        <label for="webhook-alarm-key">Webhook Token (技术维修群)</label>
+                        <input type="text" id="webhook-alarm-key" placeholder="xxxxxxxx-xxxx-xxxx-xxxxxxxx" readonly style="cursor: pointer;" title="点击修改 Token">
+                    </div>
+                    <div class="input-group" style="align-items: flex-end;">
+                        <label style="margin-bottom: 0.6rem;">推送开关</label>
+                        <label class="toggle-switch" id="webhook-alarm-toggle-label">
+                            <input type="checkbox" id="webhook-alarm-toggle">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-text" id="webhook-alarm-toggle-text">已开启</span>
+                        </label>
+                    </div>
+                    <div class="input-group" style="align-items: flex-end;">
+                        <button id="webhook-save-btn" class="btn-primary">保存推送设置</button>
+                    </div>
+                </div>
+                <div id="webhook-message" class="error-banner hidden"></div>
+            </section>
+            </div>
+
+            <!-- VIEW: Alarm Settings -->
+            <div class="view-container" id="view-settings-alarm" style="display: none;">
+            <section class="panel settings-panel glass">
+                <h2>⚙️ 告警阈值设置</h2>
+                <p class="subtitle">自定义各物理参数的触发阈值，超出限制即触发告警并推送。</p>
+                <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-top: 1.5rem; max-width: 500px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                        <label style="margin: 0; font-weight: normal;">过压告警阈值 (V)</label>
+                        <input type="number" id="inp-over-voltage" value="250" style="width: 80px; text-align: center; background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border); color: var(--primary); padding: 0.4rem; border-radius: 4px; font-weight: bold; outline: none;">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                        <label style="margin: 0; font-weight: normal;">欠压告警阈值 (V)</label>
+                        <input type="number" id="inp-under-voltage" value="190" style="width: 80px; text-align: center; background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border); color: var(--primary); padding: 0.4rem; border-radius: 4px; font-weight: bold; outline: none;">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                        <label style="margin: 0; font-weight: normal;">过流告警阈值 (A)</label>
+                        <input type="number" id="inp-over-current" value="80" style="width: 80px; text-align: center; background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border); color: var(--primary); padding: 0.4rem; border-radius: 4px; font-weight: bold; outline: none;">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                        <label style="margin: 0; font-weight: normal;">总功率异常阈值 (kW)</label>
+                        <input type="number" id="inp-over-power" value="20" style="width: 80px; text-align: center; background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border); color: var(--primary); padding: 0.4rem; border-radius: 4px; font-weight: bold; outline: none;">
+                    </div>
+                    <button class="btn-primary" id="save-alarms-config-btn" style="margin-top: 1rem; width: 100%;">保存设置</button>
+                </div>
+            </section>
+            </div>
+
+            <!-- VIEW: A Charger (Active by default) -->
+            <div class="view-container active-view" id="view-charger-a">
+            <section class="panel data-panel glass">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h2 style="display: flex; align-items: center; gap: 0.5rem;">
+                        实时数据
+                        <span class="ct-badge" style="display: none; font-size: 0.8rem; background: var(--secondary); color: white; padding: 2px 8px; border-radius: 12px; font-weight: normal;">已启用 20 倍互感器换算</span>
+                    </h2>
+                    <div class="status-indicator" style="background: rgba(0,0,0,0.4);">
+                        <div class="led charging-led"></div>
+                        <span class="charging-text">待机中</span>
+                    </div>
+                </div>
+                <p class="subtitle">当前读取 DL/T645 电表地址: <span class="display-start">尚未连接</span></p>
+                
+                <div class="data-grid"></div>
+                
+                <div class="empty-state">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill"></div>
+                    </div>
+                    <p style="margin-top: 1rem; font-size: 1.1rem; color: var(--primary);">正在连接电表获取数据...</p>
+                    <p class="small" style="color: #4CAF50;">如果长时间未显示，请检查连接设置</p>
+                </div>
+            </section>
+
+            <section class="panel records-panel glass">
+                <h2>历史充电账单</h2>
+                <p class="subtitle">系统自动根据电流检测记录的充电耗电量</p>
+                <div class="table-container">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>开始时间</th>
+                                <th>结束时间</th>
+                                <th>消耗电量 (kWh)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="records-body"></tbody>
+                    </table>
+                </div>
+            </section>
+            </div> <!-- End VIEW: A Charger -->
+
+            <!-- VIEW: Admin Settings -->
+            <div class="view-container" id="view-settings-admin" style="display: none;">
+            <section class="panel settings-panel glass">
+                <h2>管理员设置</h2>
+                <p class="subtitle">修改管理员密码。修改后，所有敏感操作均需验证新密码。</p>
+                <div class="form-grid">
+                    <div class="input-group">
+                        <label>原密码</label>
+                        <input type="password" id="admin-old-pwd" placeholder="输入原密码 (默认 123456)">
+                    </div>
+                    <div class="input-group">
+                        <label>新密码</label>
+                        <input type="password" id="admin-new-pwd" placeholder="输入新密码">
+                    </div>
+                    <div class="input-group" style="align-items: flex-end;">
+                        <button id="admin-save-btn" class="btn-primary">修改密码</button>
+                    </div>
+                </div>
+                <div id="admin-message" class="error-banner hidden"></div>
+            </section>
+            </div>
+
+            </div> <!-- End Main Content -->
+        </main>
+    </div>
+
+    <!-- Add Charger Modal -->
+    <div id="add-charger-modal" class="modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 9998;">
+        <div class="panel glass" style="width: 320px; text-align: center;">
+            <h3 style="margin-bottom: 0.5rem;">新增充电桩连接</h3>
+            <p class="subtitle" style="margin-bottom: 1.5rem;">请选择要配置的目标充电桩</p>
+            <select id="add-charger-select" style="width: 100%; margin-bottom: 1rem; padding: 0.8rem; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: white; font-family: 'Outfit';">
+                <!-- Options injected via JS -->
+            </select>
+            <div id="add-charger-error" class="error-banner hidden" style="margin-bottom: 1rem; padding: 0.5rem; font-size: 0.9rem;"></div>
+            <div style="display: flex; gap: 1rem;">
+                <button id="add-charger-cancel" class="btn-primary" style="flex: 1; background: rgba(255,255,255,0.1);">取消</button>
+                <button id="add-charger-confirm" class="btn-primary" style="flex: 1;">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 9999;">
+        <div class="panel glass" style="width: 320px; text-align: center;">
+            <h3 style="margin-bottom: 0.5rem;">🔒 安全验证</h3>
+            <p class="subtitle" style="margin-bottom: 1.5rem;">该操作需要管理员权限，请输入密码</p>
+            <input type="password" id="auth-password" style="width: 100%; margin-bottom: 1rem; padding: 0.8rem; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: white; text-align: center; font-size: 1.2rem; letter-spacing: 0.2rem;" placeholder="••••••">
+            <div id="auth-error" class="error-banner hidden" style="margin-bottom: 1rem; padding: 0.5rem; font-size: 0.9rem;"></div>
+            <div style="display: flex; gap: 1rem;">
+                <button id="auth-cancel" class="btn-primary" style="flex: 1; background: rgba(255,255,255,0.1);">取消</button>
+                <button id="auth-confirm" class="btn-primary" style="flex: 1;">确认</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Password Modal -->
+    <div class="modal-overlay hidden" id="password-modal">
+        <!-- existing modal content -->
+    </div>
+    
+    <script src="/ui/app.js"></script>
+</body>
+</html>

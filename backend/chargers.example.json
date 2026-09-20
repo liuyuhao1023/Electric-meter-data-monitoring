@@ -1,0 +1,26 @@
+{
+  "charger-1": {
+    "host": "192.168.1.100",
+    "port": 8887,
+    "address": "000000000001",
+    "name": "1号充电桩",
+    "ct_ratio": 1,
+    "location": "A区车库",
+    "sn": "SN20260001",
+    "protocol": "DL/T645-2007",
+    "remarks": "标准直通式电表",
+    "monitor_url": ""
+  },
+  "charger-2": {
+    "host": "192.168.1.101",
+    "port": 8887,
+    "address": "000000000002",
+    "name": "2号充电桩",
+    "ct_ratio": 20,
+    "location": "B区车库",
+    "sn": "SN20260002",
+    "protocol": "DL/T645-2007",
+    "remarks": "配置20倍互感器",
+    "monitor_url": ""
+  }
+}

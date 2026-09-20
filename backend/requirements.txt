@@ -1,0 +1,4 @@
+fastapi==0.111.0
+uvicorn==0.30.1
+pymodbus==3.6.8
+websockets==12.0
