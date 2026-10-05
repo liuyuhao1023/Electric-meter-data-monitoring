@@ -41,8 +41,8 @@ ENERGY_STATS_FILE = "energy_stats.json"
 SERVICE_LOGS_FILE = "service_logs.json"
 CURRENT_OVERLOAD_RULES_FILE = "current_overload_rules.json"
 
-DASHBOARD_LAN_URL = os.getenv("DASHBOARD_LAN_URL", "http://localhost:3004/ui/index.html")
-DASHBOARD_WAN_URL = os.getenv("DASHBOARD_WAN_URL", "")
+DASHBOARD_LAN_URL = os.getenv("DASHBOARD_LAN_URL", "http://192.168.1.225:3004/ui/index.html")
+DASHBOARD_WAN_URL = os.getenv("DASHBOARD_WAN_URL", "http://yunshangxinxi.top:3004/ui/index.html")
 
 def get_dashboard_links_md():
     links = [f"[🏠 局域网访问]({DASHBOARD_LAN_URL})"]
