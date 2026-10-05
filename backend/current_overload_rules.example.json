@@ -1,0 +1,21 @@
+[
+  {
+    "id": "rule_main_line",
+    "name": "主进线防跳闸预警 (1号枪+2号枪)",
+    "chargers": [
+      "charger-1",
+      "charger-2"
+    ],
+    "threshold_current": 32.0,
+    "duration_seconds": 4,
+    "repeat_enabled": true,
+    "repeat_interval_minutes": 10,
+    "cooldown_minutes": 10,
+    "max_repeat_count": 0,
+    "custom_message": "⚠️ 警告：总电流达到 {current}A（超过警戒阈值 {threshold}A），请现场管理人员立即调控！",
+    "enabled": true,
+    "notify_on_recovery": true,
+    "notify_recovery": true,
+    "custom_webhook": ""
+  }
+]

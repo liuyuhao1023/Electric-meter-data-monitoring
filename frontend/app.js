@@ -20,6 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const targetViewId = item.getAttribute('data-view');
             const targetView = document.getElementById(targetViewId);
             if (targetView) targetView.style.display = 'block';
+            if (targetViewId === 'view-current-overload' && typeof loadOverloadRules === 'function') {
+                loadOverloadRules();
+            }
         });
     });
     // Auth Modal Logic
@@ -72,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 chargersConfig = data;
                 renderConfigForms();
+                if (typeof renderOverloadView === 'function') renderOverloadView();
                 if (!ws) connect();
             })
             .catch(err => console.error("Could not load chargers settings:", err));
@@ -286,6 +290,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const webhookAlarmKeyInput = document.getElementById('webhook-alarm-key');
     const webhookAlarmToggle = document.getElementById('webhook-alarm-toggle');
     const webhookAlarmToggleText = document.getElementById('webhook-alarm-toggle-text');
+
+    const webhookOverloadKeyInput = document.getElementById('webhook-overload-key');
+    const webhookOverloadToggle = document.getElementById('webhook-overload-toggle');
+    const webhookOverloadToggleText = document.getElementById('webhook-overload-toggle-text');
     
     const webhookSaveBtn = document.getElementById('webhook-save-btn');
     const webhookMessage = document.getElementById('webhook-message');
@@ -296,6 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 if (!data.charge) data.charge = {};
                 if (!data.alarm) data.alarm = {};
+                if (!data.overload) data.overload = {};
                 
                 webhookChargeKeyInput.value = data.charge.key || '';
                 webhookChargeToggle.checked = data.charge.enabled !== false;
@@ -306,13 +315,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 webhookAlarmToggle.checked = data.alarm.enabled !== false;
                 webhookAlarmToggleText.textContent = webhookAlarmToggle.checked ? '已开启' : '已关闭';
                 webhookAlarmKeyInput.readOnly = true;
+
+                if (webhookOverloadKeyInput) {
+                    webhookOverloadKeyInput.value = data.overload.key || '';
+                    if (webhookOverloadToggle) {
+                        webhookOverloadToggle.checked = data.overload.enabled !== false;
+                        if (webhookOverloadToggleText) webhookOverloadToggleText.textContent = webhookOverloadToggle.checked ? '已开启' : '已关闭';
+                    }
+                    webhookOverloadKeyInput.readOnly = true;
+                }
+
+                // Sync with independent card on overload view
+                const inpOverloadCard = document.getElementById('inp-overload-webhook-key');
+                const toggleOverloadCard = document.getElementById('overload-webhook-toggle');
+                const toggleTextOverloadCard = document.getElementById('overload-webhook-toggle-text');
+                if (inpOverloadCard) inpOverloadCard.value = data.overload.key || '';
+                if (toggleOverloadCard) {
+                    toggleOverloadCard.checked = data.overload.enabled !== false;
+                    if (toggleTextOverloadCard) toggleTextOverloadCard.textContent = toggleOverloadCard.checked ? '已开启' : '已关闭';
+                }
             });
     }
 
-    [webhookChargeKeyInput, webhookAlarmKeyInput].forEach(inp => {
+    [webhookChargeKeyInput, webhookAlarmKeyInput, webhookOverloadKeyInput].forEach(inp => {
+        if (!inp) return;
         inp.addEventListener('click', () => {
             if (inp.readOnly) {
-                if (confirm("是否修改当前Token？")) {
+                if (confirm("是否修改当前Token / Webhook 链接？")) {
                     inp.readOnly = false;
                     inp.style.cursor = 'text';
                     inp.focus();
@@ -323,6 +352,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     webhookChargeToggle.addEventListener('change', () => { webhookChargeToggleText.textContent = webhookChargeToggle.checked ? '已开启' : '已关闭'; });
     webhookAlarmToggle.addEventListener('change', () => { webhookAlarmToggleText.textContent = webhookAlarmToggle.checked ? '已开启' : '已关闭'; });
+    if (webhookOverloadToggle && webhookOverloadToggleText) {
+        webhookOverloadToggle.addEventListener('change', () => { webhookOverloadToggleText.textContent = webhookOverloadToggle.checked ? '已开启' : '已关闭'; });
+    }
 
     function showWebhookMessage(msg, type) {
         webhookMessage.textContent = msg;
@@ -339,6 +371,10 @@ document.addEventListener('DOMContentLoaded', () => {
             alarm: {
                 key: webhookAlarmKeyInput.value,
                 enabled: webhookAlarmToggle.checked
+            },
+            overload: {
+                key: webhookOverloadKeyInput ? webhookOverloadKeyInput.value : '',
+                enabled: webhookOverloadToggle ? webhookOverloadToggle.checked : true
             }
         };
         withAuth((pwd) => {
@@ -356,6 +392,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     showWebhookMessage("保存成功！", 'success');
                     webhookChargeKeyInput.readOnly = true;
                     webhookAlarmKeyInput.readOnly = true;
+                    if (webhookOverloadKeyInput) webhookOverloadKeyInput.readOnly = true;
+                    // Sync card in overload view
+                    loadWebhookSettings();
                 }
             });
         });
@@ -450,6 +489,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = JSON.parse(event.data);
             if (data.type === 'realtime') {
                 handleRealtimeData(data);
+            } else if (data.type === 'current_overload_update') {
+                handleOverloadRealtime(data.data);
             } else if (data.type === 'new_record') {
                 appendRecord(data.charger_id, data.record);
             } else if (data.type === 'alarm') {
@@ -1059,6 +1100,583 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ==========================================
+    // Current Overload Monitoring & Rule System
+    // ==========================================
+    let overloadRules = [];
+    let overloadRealtime = [];
+
+    const overloadCardsContainer = document.getElementById('overload-realtime-cards');
+    const overloadRulesTableBody = document.getElementById('overload-rules-table-body');
+    const addOverloadRuleBtn = document.getElementById('add-overload-rule-btn');
+    const overloadRuleModal = document.getElementById('overload-rule-modal');
+    const overloadModalTitle = document.getElementById('overload-modal-title');
+    const overloadRuleIdInput = document.getElementById('overload-rule-id');
+    const overloadRuleNameInput = document.getElementById('overload-rule-name');
+    const overloadChargersCheckboxes = document.getElementById('overload-chargers-checkboxes');
+    const overloadThresholdInput = document.getElementById('overload-rule-threshold');
+    const overloadDurationInput = document.getElementById('overload-rule-duration');
+    const overloadRepeatEnabledInput = document.getElementById('overload-rule-repeat-enabled');
+    const overloadRepeatIntervalInput = document.getElementById('overload-rule-repeat-interval');
+    const overloadMaxRepeatInput = document.getElementById('overload-rule-max-repeat');
+    const overloadCustomMsgInput = document.getElementById('overload-rule-custom-msg');
+    const overloadCustomRecoveryMsgInput = document.getElementById('overload-rule-custom-recovery-msg');
+    const overloadEnabledInput = document.getElementById('overload-rule-enabled');
+    const overloadRecoveryInput = document.getElementById('overload-rule-recovery');
+    const overloadModalError = document.getElementById('overload-modal-error');
+    const overloadModalCancel = document.getElementById('overload-modal-cancel');
+    const overloadModalSave = document.getElementById('overload-modal-save');
+
+    function loadOverloadRules() {
+        fetch(`${apiUrl}/current-overload/rules`)
+            .then(res => res.json())
+            .then(data => {
+                overloadRules = data.rules || [];
+                overloadRealtime = data.realtime || [];
+                renderOverloadView();
+            })
+            .catch(err => console.error("Could not load overload rules:", err));
+    }
+
+    function handleOverloadRealtime(realtimeList) {
+        if (!Array.isArray(realtimeList)) return;
+        overloadRealtime = realtimeList;
+        renderOverloadRealtimeCards();
+    }
+
+    function renderOverloadView() {
+        renderOverloadRealtimeCards();
+        renderOverloadRulesTable();
+    }
+
+    function renderOverloadRealtimeCards() {
+        if (!overloadCardsContainer) return;
+        if (overloadRules.length === 0) {
+            overloadCardsContainer.innerHTML = `
+                <div style="grid-column: 1 / -1; padding: 2.5rem; text-align: center; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 12px; border: 1px dashed var(--glass-border);">
+                    <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">暂无主线电流预警规则</p>
+                    <p style="font-size: 0.85rem;">点击右上角「新增主线预警规则」以配置跨桩总电流监测与企业微信告警</p>
+                </div>
+            `;
+            return;
+        }
+
+        overloadCardsContainer.innerHTML = '';
+        overloadRules.forEach(rule => {
+            const rt = overloadRealtime.find(r => r.rule_id === rule.id) || {
+                rule_id: rule.id,
+                name: rule.name,
+                is_alarming: false,
+                current_max: 0.0,
+                phases: { A: 0.0, B: 0.0, C: 0.0 },
+                chargers: {}
+            };
+
+            const curr = rt.current_max !== undefined ? rt.current_max : 0.0;
+            const threshold = rule.threshold_current || 32.0;
+            const percent = Math.min(Math.round((curr / threshold) * 100), 150);
+            const isAlarming = !!rt.is_alarming;
+            const isEnabled = rule.enabled !== false;
+
+            let fillClass = 'normal';
+            if (percent >= 100 || isAlarming) fillClass = 'danger';
+            else if (percent >= 80) fillClass = 'warning';
+
+            let statusBadge = '';
+            if (!isEnabled) {
+                statusBadge = '<span class="load-badge disabled">⚪ 已禁用</span>';
+            } else if (isAlarming) {
+                statusBadge = '<span class="load-badge overload">🚨 告警超载</span>';
+            } else {
+                statusBadge = '<span class="load-badge safe">🟢 正常运行</span>';
+            }
+
+            // Charger chips
+            const chargerChipsHtml = (rule.chargers || []).map(cid => {
+                const cname = chargersConfig[cid]?.name || cid;
+                const cinfo = rt.chargers ? rt.chargers[cid] : null;
+                const cmax = cinfo && cinfo.max !== undefined ? `${cinfo.max}A` : '-';
+                return `
+                    <div class="load-charger-chip" title="${cname} 峰值: ${cmax}">
+                        <span class="chip-dot"></span>
+                        <span>${cname}</span>
+                        <strong style="color: white; margin-left: 2px;">${cmax}</strong>
+                    </div>
+                `;
+            }).join('');
+
+            const card = document.createElement('div');
+            card.className = `load-card ${isAlarming ? 'alarming' : ''}`;
+            card.innerHTML = `
+                <div class="load-card-header">
+                    <div class="load-card-title">
+                        <span>⚡</span>
+                        <span>${rule.name}</span>
+                    </div>
+                    ${statusBadge}
+                </div>
+
+                <div class="load-current-metrics">
+                    <div class="load-current-main">
+                        ${curr.toFixed(1)}<small>A (峰值)</small>
+                    </div>
+                    <div class="load-current-limit">
+                        预警阈值 <span>${threshold}A</span> (${percent}%)
+                    </div>
+                </div>
+
+                <div class="load-progress-bar">
+                    <div class="load-progress-fill ${fillClass}" style="width: ${Math.min(percent, 100)}%;"></div>
+                </div>
+
+                <div class="load-phases-grid">
+                    <div class="phase-pill">
+                        <div class="phase-pill-label">A相负荷</div>
+                        <div class="phase-pill-val">${(rt.phases?.A || 0.0).toFixed(1)}<small>A</small></div>
+                    </div>
+                    <div class="phase-pill">
+                        <div class="phase-pill-label">B相负荷</div>
+                        <div class="phase-pill-val">${(rt.phases?.B || 0.0).toFixed(1)}<small>A</small></div>
+                    </div>
+                    <div class="phase-pill">
+                        <div class="phase-pill-label">C相负荷</div>
+                        <div class="phase-pill-val">${(rt.phases?.C || 0.0).toFixed(1)}<small>A</small></div>
+                    </div>
+                </div>
+
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: -0.3rem;">关联回路:</div>
+                <div class="load-chargers-summary">
+                    ${chargerChipsHtml || '<span style="color: var(--text-muted); font-size: 0.8rem;">未关联充电桩</span>'}
+                </div>
+
+                <div class="load-card-footer">
+                    <span>持续: ${rule.duration_seconds || 4}s | 冷却: ${rule.cooldown_minutes || 10}m</span>
+                    <div class="load-card-actions">
+                        <button class="btn-icon-action btn-test-rule" data-id="${rule.id}" title="触发一次企业微信测试推送">⚡ 测试</button>
+                        <button class="btn-icon-action btn-edit-rule" data-id="${rule.id}" title="编辑规则">✏️ 编辑</button>
+                        <button class="btn-icon-action danger btn-del-rule" data-id="${rule.id}" title="删除规则">🗑️</button>
+                    </div>
+                </div>
+            `;
+
+            card.querySelector('.btn-test-rule').addEventListener('click', () => triggerTestAlert(rule.id));
+            card.querySelector('.btn-edit-rule').addEventListener('click', () => openRuleModal(rule));
+            card.querySelector('.btn-del-rule').addEventListener('click', () => deleteRule(rule.id));
+
+            overloadCardsContainer.appendChild(card);
+        });
+    }
+
+    function renderOverloadRulesTable() {
+        if (!overloadRulesTableBody) return;
+        if (overloadRules.length === 0) {
+            overloadRulesTableBody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无预警规则</td>
+                </tr>
+            `;
+            return;
+        }
+
+        overloadRulesTableBody.innerHTML = '';
+        overloadRules.forEach(rule => {
+            const tr = document.createElement('tr');
+            
+            const chargersText = (rule.chargers || []).map(cid => {
+                return chargersConfig[cid]?.name || cid;
+            }).join(' + ') || '-';
+
+            const enabledBadge = rule.enabled !== false 
+                ? '<span style="color: var(--success); font-weight: 600;">已启用</span>' 
+                : '<span style="color: var(--text-muted);">已停用</span>';
+
+            const recoveryBadge = rule.notify_on_recovery 
+                ? '<span style="color: var(--primary);">已开启</span>' 
+                : '<span style="color: var(--text-muted);">关闭</span>';
+
+            const repeatEnabled = rule.repeat_enabled !== false;
+            const repeatInterval = rule.repeat_interval_minutes || rule.cooldown_minutes || 10;
+            const maxRepeat = parseInt(rule.max_repeat_count || 0, 10);
+            let repeatText = '';
+            if (!repeatEnabled) {
+                repeatText = '<span style="color: var(--text-muted); font-size: 0.82rem;">单次报警 (不重复)</span>';
+            } else if (maxRepeat > 0) {
+                repeatText = `<span style="color: var(--primary); font-size: 0.85rem;">每 ${repeatInterval} 分钟 (最多${maxRepeat}次)</span>`;
+            } else {
+                repeatText = `<span style="color: var(--primary); font-size: 0.85rem;">每 ${repeatInterval} 分钟 (持续提醒)</span>`;
+            }
+
+            const customMsg = (rule.custom_message || '').trim();
+            const customMsgHtml = customMsg 
+                ? `<span title="${customMsg.replace(/"/g, '&quot;')}" style="display: inline-block; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; color: #ffd166; font-size: 0.82rem;">${customMsg}</span>`
+                : '<span style="color: var(--text-muted); font-size: 0.8rem;">默认卡片</span>';
+
+            tr.innerHTML = `
+                <td><strong>${rule.name}</strong></td>
+                <td><span style="color: var(--primary);">${chargersText}</span></td>
+                <td><span class="highlight-value">${rule.threshold_current}</span> A</td>
+                <td>${rule.duration_seconds || 4} 秒</td>
+                <td>${repeatText}</td>
+                <td>${customMsgHtml}</td>
+                <td>${recoveryBadge}</td>
+                <td>${enabledBadge}</td>
+                <td style="text-align: center;">
+                    <div style="display: inline-flex; gap: 0.4rem;">
+                        <button class="btn-icon-action btn-tbl-test" title="发送测试推送">⚡ 测试</button>
+                        <button class="btn-icon-action btn-tbl-edit" title="编辑规则">✏️ 编辑</button>
+                        <button class="btn-icon-action danger btn-tbl-del" title="删除规则">🗑️ 删除</button>
+                    </div>
+                </td>
+            `;
+
+            tr.querySelector('.btn-tbl-test').addEventListener('click', () => triggerTestAlert(rule.id));
+            tr.querySelector('.btn-tbl-edit').addEventListener('click', () => openRuleModal(rule));
+            tr.querySelector('.btn-tbl-del').addEventListener('click', () => deleteRule(rule.id));
+
+            overloadRulesTableBody.appendChild(tr);
+        });
+    }
+
+    function openRuleModal(ruleToEdit = null) {
+        try {
+            console.log("openRuleModal triggered, editing:", ruleToEdit);
+            const modal = document.getElementById('overload-rule-modal') || overloadRuleModal;
+            if (!modal) {
+                console.error("Could not find overload-rule-modal DOM element!");
+                alert("未找到预警弹窗组件，请按 Ctrl+F5 刷新！");
+                return;
+            }
+
+            if (overloadModalError) overloadModalError.classList.add('hidden');
+            if (overloadChargersCheckboxes) overloadChargersCheckboxes.innerHTML = '';
+
+            const selectedChargers = new Set(ruleToEdit ? (ruleToEdit.chargers || []) : Object.keys(chargersConfig || {}));
+            const chargerKeys = Object.keys(chargersConfig || {});
+
+            if (overloadChargersCheckboxes) {
+                if (chargerKeys.length === 0) {
+                    overloadChargersCheckboxes.innerHTML = `<span style="color: var(--text-muted); font-size: 0.85rem;">暂无可用的充电桩配置</span>`;
+                } else {
+                    chargerKeys.forEach(cid => {
+                        const conf = (chargersConfig && chargersConfig[cid]) || {};
+                        const cname = conf.name || cid;
+                        const isChecked = selectedChargers.has(cid);
+                        const label = document.createElement('label');
+                        label.className = `charger-checkbox-tag ${isChecked ? 'selected' : ''}`;
+                        label.innerHTML = `
+                            <input type="checkbox" value="${cid}" ${isChecked ? 'checked' : ''}>
+                            <span>${cname}</span>
+                        `;
+                        const input = label.querySelector('input');
+                        if (input) {
+                            input.addEventListener('change', (e) => {
+                                if (e.target.checked) label.classList.add('selected');
+                                else label.classList.remove('selected');
+                            });
+                        }
+                        overloadChargersCheckboxes.appendChild(label);
+                    });
+                }
+            }
+
+            const defaultName = '主回路过载预警 (' + (chargerKeys.map(k => (chargersConfig && chargersConfig[k] && chargersConfig[k].name) || k).join('+') || '总线') + ')';
+
+            const overloadRuleWebhookInput = document.getElementById('overload-rule-webhook');
+
+            if (ruleToEdit) {
+                if (overloadModalTitle) overloadModalTitle.textContent = '✏️ 编辑主线电流预警规则';
+                if (overloadRuleIdInput) overloadRuleIdInput.value = ruleToEdit.id || '';
+                if (overloadRuleNameInput) overloadRuleNameInput.value = ruleToEdit.name || '';
+                if (overloadThresholdInput) overloadThresholdInput.value = ruleToEdit.threshold_current !== undefined ? ruleToEdit.threshold_current : '32.0';
+                if (overloadDurationInput) overloadDurationInput.value = ruleToEdit.duration_seconds !== undefined ? ruleToEdit.duration_seconds : 4;
+                if (overloadRepeatEnabledInput) overloadRepeatEnabledInput.checked = ruleToEdit.repeat_enabled !== false;
+                if (overloadRepeatIntervalInput) overloadRepeatIntervalInput.value = ruleToEdit.repeat_interval_minutes || ruleToEdit.cooldown_minutes || 10;
+                if (overloadMaxRepeatInput) overloadMaxRepeatInput.value = ruleToEdit.max_repeat_count !== undefined ? ruleToEdit.max_repeat_count : 0;
+                if (overloadCustomMsgInput) overloadCustomMsgInput.value = ruleToEdit.custom_message || '';
+                if (overloadCustomRecoveryMsgInput) overloadCustomRecoveryMsgInput.value = ruleToEdit.custom_recovery_message || '';
+                if (overloadEnabledInput) overloadEnabledInput.checked = ruleToEdit.enabled !== false;
+                if (overloadRecoveryInput) overloadRecoveryInput.checked = ruleToEdit.notify_on_recovery !== false;
+                if (overloadRuleWebhookInput) overloadRuleWebhookInput.value = ruleToEdit.custom_webhook || '';
+            } else {
+                if (overloadModalTitle) overloadModalTitle.textContent = '➕ 新增主线电流预警规则';
+                if (overloadRuleIdInput) overloadRuleIdInput.value = '';
+                if (overloadRuleNameInput) overloadRuleNameInput.value = defaultName;
+                if (overloadThresholdInput) overloadThresholdInput.value = '32.0';
+                if (overloadDurationInput) overloadDurationInput.value = '4';
+                if (overloadRepeatEnabledInput) overloadRepeatEnabledInput.checked = true;
+                if (overloadRepeatIntervalInput) overloadRepeatIntervalInput.value = '10';
+                if (overloadMaxRepeatInput) overloadMaxRepeatInput.value = '0';
+                if (overloadCustomMsgInput) overloadCustomMsgInput.value = '';
+                if (overloadCustomRecoveryMsgInput) overloadCustomRecoveryMsgInput.value = '';
+                if (overloadEnabledInput) overloadEnabledInput.checked = true;
+                if (overloadRecoveryInput) overloadRecoveryInput.checked = true;
+                if (overloadRuleWebhookInput) overloadRuleWebhookInput.value = '';
+            }
+
+            modal.style.display = 'flex';
+            if (overloadRuleNameInput) setTimeout(() => overloadRuleNameInput.focus(), 50);
+        } catch (e) {
+            console.error("openRuleModal failed:", e);
+            alert("打开预警规则弹窗出错: " + e.message);
+        }
+    }
+
+    function closeRuleModal() {
+        const modal = document.getElementById('overload-rule-modal') || overloadRuleModal;
+        if (modal) modal.style.display = 'none';
+    }
+
+    // Expose to window for inline onclick safety
+    window.openRuleModal = openRuleModal;
+    window.closeRuleModal = closeRuleModal;
+
+    if (overloadRuleModal) {
+        overloadRuleModal.addEventListener('click', (e) => {
+            if (e.target === overloadRuleModal) closeRuleModal();
+        });
+    }
+
+    if (addOverloadRuleBtn) {
+        addOverloadRuleBtn.addEventListener('click', () => openRuleModal(null));
+    }
+    if (overloadModalCancel) {
+        overloadModalCancel.addEventListener('click', closeRuleModal);
+    }
+
+    // Insert placeholders for custom message template
+    document.querySelectorAll('.btn-insert-tag').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const tag = btn.getAttribute('data-tag');
+            const targetId = btn.getAttribute('data-target') || 'overload-rule-custom-msg';
+            const textarea = document.getElementById(targetId) || overloadCustomMsgInput;
+            if (!textarea || !tag) return;
+            const start = textarea.selectionStart || textarea.value.length;
+            const end = textarea.selectionEnd || textarea.value.length;
+            const val = textarea.value;
+            textarea.value = val.substring(0, start) + tag + val.substring(end);
+            textarea.focus();
+            setTimeout(() => {
+                textarea.selectionStart = textarea.selectionEnd = start + tag.length;
+            }, 0);
+        });
+    });
+
+    // Handlers for independent overload push card
+    const btnSaveOverloadWebhook = document.getElementById('btn-save-overload-webhook');
+    const btnTestOverloadWebhook = document.getElementById('btn-test-overload-webhook');
+    const inpOverloadWebhookKey = document.getElementById('inp-overload-webhook-key');
+    const overloadWebhookToggle = document.getElementById('overload-webhook-toggle');
+    const overloadWebhookToggleText = document.getElementById('overload-webhook-toggle-text');
+
+    if (overloadWebhookToggle && overloadWebhookToggleText) {
+        overloadWebhookToggle.addEventListener('change', () => {
+            overloadWebhookToggleText.textContent = overloadWebhookToggle.checked ? '已开启' : '已关闭';
+        });
+    }
+
+    if (btnSaveOverloadWebhook) {
+        btnSaveOverloadWebhook.addEventListener('click', () => {
+            const keyVal = inpOverloadWebhookKey ? inpOverloadWebhookKey.value.trim() : '';
+            const enabledVal = overloadWebhookToggle ? overloadWebhookToggle.checked : true;
+            withAuth((pwd) => {
+                fetch(`${apiUrl}/current-overload/webhook`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-password': pwd },
+                    body: JSON.stringify({ key: keyVal, enabled: enabledVal })
+                }).then(async r => {
+                    if (r.status === 401) {
+                        alert("密码错误，保存失败！");
+                        return;
+                    }
+                    if (!r.ok) {
+                        const err = await r.json();
+                        alert("保存失败: " + (err.detail || '未知错误'));
+                        return;
+                    }
+                    alert("主线预警独立推送通道保存成功！");
+                    loadWebhookSettings();
+                }).catch(e => alert("网络请求失败: " + e.message));
+            });
+        });
+    }
+
+    if (btnTestOverloadWebhook) {
+        btnTestOverloadWebhook.addEventListener('click', () => {
+            withAuth((pwd) => {
+                fetch(`${apiUrl}/current-overload/test-webhook`, {
+                    method: 'POST',
+                    headers: { 'x-admin-password': pwd }
+                }).then(async r => {
+                    if (r.status === 401) {
+                        alert("密码错误！");
+                        return;
+                    }
+                    const data = await r.json();
+                    if (r.ok) {
+                        alert("独立通道测试推送成功！请查看企业微信群消息。");
+                    } else {
+                        alert("测试失败: " + (data.detail || '未知错误'));
+                    }
+                }).catch(e => alert("网络请求失败: " + e.message));
+            });
+        });
+    }
+
+    if (overloadModalSave) {
+        overloadModalSave.addEventListener('click', () => {
+            const ruleId = overloadRuleIdInput.value.trim();
+            const ruleName = overloadRuleNameInput.value.trim();
+            const threshold = parseFloat(overloadThresholdInput.value);
+            const duration = parseInt(overloadDurationInput.value, 10);
+            const repeatEnabled = overloadRepeatEnabledInput ? overloadRepeatEnabledInput.checked : true;
+            const repeatInterval = overloadRepeatIntervalInput ? (parseInt(overloadRepeatIntervalInput.value, 10) || 10) : 10;
+            const maxRepeat = overloadMaxRepeatInput ? (parseInt(overloadMaxRepeatInput.value, 10) || 0) : 0;
+            const customMsg = overloadCustomMsgInput ? overloadCustomMsgInput.value.trim() : '';
+            const customRecoveryMsg = overloadCustomRecoveryMsgInput ? overloadCustomRecoveryMsgInput.value.trim() : '';
+            const enabled = overloadEnabledInput.checked;
+            const recovery = overloadRecoveryInput.checked;
+            const customWebhook = (document.getElementById('overload-rule-webhook')?.value || '').trim();
+
+            if (!ruleName) {
+                overloadModalError.textContent = '请输入规则名称';
+                overloadModalError.classList.remove('hidden');
+                return;
+            }
+            if (isNaN(threshold) || threshold <= 0) {
+                overloadModalError.textContent = '请输入合法的预警阈值电流 (> 0)';
+                overloadModalError.classList.remove('hidden');
+                return;
+            }
+
+            const checkedCids = [];
+            overloadChargersCheckboxes.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+                checkedCids.push(cb.value);
+            });
+
+            if (checkedCids.length === 0) {
+                overloadModalError.textContent = '请至少勾选一个关联充电桩';
+                overloadModalError.classList.remove('hidden');
+                return;
+            }
+
+            const ruleObj = {
+                id: ruleId || `rule_${Date.now()}`,
+                name: ruleName,
+                chargers: checkedCids,
+                threshold_current: threshold,
+                duration_seconds: isNaN(duration) ? 4 : duration,
+                repeat_enabled: repeatEnabled,
+                repeat_interval_minutes: repeatInterval,
+                cooldown_minutes: repeatInterval,
+                max_repeat_count: maxRepeat,
+                custom_message: customMsg,
+                custom_recovery_message: customRecoveryMsg,
+                notify_on_recovery: recovery,
+                enabled: enabled,
+                custom_webhook: customWebhook
+            };
+
+            let updatedList = [...overloadRules];
+            const existingIdx = updatedList.findIndex(r => r.id === ruleObj.id);
+            if (existingIdx >= 0) {
+                updatedList[existingIdx] = ruleObj;
+            } else {
+                updatedList.push(ruleObj);
+            }
+
+            withAuth((pwd) => {
+                fetch(`${apiUrl}/current-overload/rules`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-admin-password': pwd
+                    },
+                    body: JSON.stringify({ rules: updatedList })
+                })
+                .then(async res => {
+                    if (res.status === 401) {
+                        alert("密码错误，保存失败！");
+                        return;
+                    }
+                    if (!res.ok) {
+                        const err = await res.json();
+                        alert(`保存失败: ${err.detail || '未知错误'}`);
+                        return;
+                    }
+                    const data = await res.json();
+                    overloadRules = data.rules || updatedList;
+                    closeRuleModal();
+                    renderOverloadView();
+                })
+                .catch(err => {
+                    alert(`网络请求异常: ${err.message}`);
+                });
+            });
+        });
+    }
+
+    function deleteRule(ruleId) {
+        const rule = overloadRules.find(r => r.id === ruleId);
+        if (!rule) return;
+        if (!confirm(`确定要删除规则「${rule.name}」吗？`)) return;
+
+        const updatedList = overloadRules.filter(r => r.id !== ruleId);
+        withAuth((pwd) => {
+            fetch(`${apiUrl}/current-overload/rules`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-admin-password': pwd
+                },
+                body: JSON.stringify({ rules: updatedList })
+            })
+            .then(async res => {
+                if (res.status === 401) {
+                    alert("密码错误，删除失败！");
+                    return;
+                }
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert(`删除失败: ${err.detail || '未知错误'}`);
+                    return;
+                }
+                const data = await res.json();
+                overloadRules = data.rules || updatedList;
+                renderOverloadView();
+            })
+            .catch(err => {
+                alert(`网络异常: ${err.message}`);
+            });
+        });
+    }
+
+    function triggerTestAlert(ruleId) {
+        const rule = overloadRules.find(r => r.id === ruleId);
+        const name = rule ? rule.name : ruleId;
+        if (!confirm(`确定向企业微信发送「${name}」的测试推送吗？`)) return;
+
+        withAuth((pwd) => {
+            fetch(`${apiUrl}/current-overload/test-alert/${ruleId}`, {
+                method: 'POST',
+                headers: { 'x-admin-password': pwd }
+            })
+            .then(async res => {
+                if (res.status === 401) {
+                    alert("密码错误！");
+                    return;
+                }
+                const data = await res.json();
+                if (res.ok) {
+                    alert(`测试推送发送成功！\n请查看企业微信群消息。\n(详细响应: ${data.detail || 'OK'})`);
+                } else {
+                    alert(`测试推送失败: ${data.detail || '未知错误'}`);
+                }
+            })
+            .catch(err => alert(`网络异常: ${err.message}`));
+        });
+    }
+
     loadSettings();
     loadWebhookSettings();
     loadRecords();
@@ -1067,6 +1685,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initEnergyDashboard();
     loadEnergyStats();
     loadGlobalRecords();
+    loadOverloadRules();
 
     // Global tick for dynamic system time display
     setInterval(() => {

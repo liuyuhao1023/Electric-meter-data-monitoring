@@ -16,6 +16,7 @@ backend/alarm_config.json
 backend/alarms.json
 backend/energy_stats.json
 backend/service_logs.json
+backend/current_overload_rules.json
 backend/temp_*.json
 
 # Archives & Logs
