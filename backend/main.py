@@ -704,10 +704,10 @@ async def poll_meter_data(charger_id: str):
                     writer.write(req)
                     await asyncio.wait_for(writer.drain(), timeout=2.0)
                     try:
-                        resp = await asyncio.wait_for(reader.read(1024), timeout=2.5)
+                        resp = await asyncio.wait_for(reader.read(1024), timeout=4.0)
                         if not resp:
                             err_msg = "电表无响应"
-                            await asyncio.sleep(1.0)
+                            await asyncio.sleep(0.5)
                             continue
                         val, err = parse_dlt645_response(resp, di)
                         if err:
@@ -728,13 +728,16 @@ async def poll_meter_data(charger_id: str):
                         break
                     except asyncio.TimeoutError:
                         err_msg = "读取超时"
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(0.5)
                         continue
                 if not metric_success:
-                    if di == "0400010C":
+                    if di in ("0400010C", "00020000", "02060000"):
                         continue
                     success = False
                     break
+            
+            if success:
+                st["fail_streak"] = 0
             
             if not success:
                 st["offline_counter"] = st.get("offline_counter", 0) + 1
@@ -964,12 +967,12 @@ async def poll_meter_data(charger_id: str):
                 "energy_stats": energy_stats.get(charger_id, {}),
                 "balance": chargers_recharge_state.get(charger_id, {}).get("balance") if isinstance(chargers_recharge_state.get(charger_id), dict) else chargers_recharge_state.get(charger_id)
             }
-        except Exception as e:
+        except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError) as net_err:
             result_data = {
                 "type": "realtime", 
                 "charger_id": charger_id, 
                 "status": "error", 
-                "message": str(e),
+                "message": f"网络断开: {net_err}",
                 "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             if writer:
@@ -978,6 +981,34 @@ async def poll_meter_data(charger_id: str):
                     await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
                 except: pass
             reader, writer = None, None
+            st["fail_streak"] = 0
+        except Exception as e:
+            fail_streak = st.get("fail_streak", 0) + 1
+            st["fail_streak"] = fail_streak
+            
+            # 若已有历史数据且偶发失败未达3次，保留上一次数据，避免WiFi偶发抖动导致前端频繁闪烁离线
+            prev_data = last_result_data.get(charger_id, {})
+            if fail_streak < 3 and prev_data.get("status") == "success" and prev_data.get("metrics"):
+                result_data = dict(prev_data)
+                result_data["update_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                result_data = {
+                    "type": "realtime", 
+                    "charger_id": charger_id, 
+                    "status": "error", 
+                    "message": str(e),
+                    "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            
+            # 只有连续失败达3次才彻底重置Socket，避免偶发WiFi丢包导致反复销毁重建打爆串口服务器
+            if fail_streak >= 3:
+                if writer:
+                    try:
+                        writer.close()
+                        await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
+                    except: pass
+                reader, writer = None, None
+                st["fail_streak"] = 0
             
         last_result_data[charger_id] = result_data
             
