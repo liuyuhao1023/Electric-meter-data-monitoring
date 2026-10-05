@@ -1116,7 +1116,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const overloadChargersCheckboxes = document.getElementById('overload-chargers-checkboxes');
     const overloadThresholdInput = document.getElementById('overload-rule-threshold');
     const overloadDurationInput = document.getElementById('overload-rule-duration');
+    const overloadBurstCountInput = document.getElementById('overload-rule-burst-count');
     const overloadRepeatEnabledInput = document.getElementById('overload-rule-repeat-enabled');
+    const repeatSettingsRow = document.getElementById('repeat-settings-row');
     const overloadRepeatIntervalInput = document.getElementById('overload-rule-repeat-interval');
     const overloadMaxRepeatInput = document.getElementById('overload-rule-max-repeat');
     const overloadCustomMsgInput = document.getElementById('overload-rule-custom-msg');
@@ -1294,16 +1296,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? '<span style="color: var(--primary);">已开启</span>' 
                 : '<span style="color: var(--text-muted);">关闭</span>';
 
-            const repeatEnabled = rule.repeat_enabled !== false;
+            const burstCount = rule.burst_count !== undefined ? rule.burst_count : 5;
+            const repeatEnabled = rule.repeat_enabled === true;
             const repeatInterval = rule.repeat_interval_minutes || rule.cooldown_minutes || 10;
             const maxRepeat = parseInt(rule.max_repeat_count || 0, 10);
             let repeatText = '';
             if (!repeatEnabled) {
-                repeatText = '<span style="color: var(--text-muted); font-size: 0.82rem;">单次报警 (不重复)</span>';
+                repeatText = `<span style="color: var(--warning); font-size: 0.82rem; font-weight: 600;">连发 ${burstCount} 条 (单周期不重复)</span>`;
             } else if (maxRepeat > 0) {
-                repeatText = `<span style="color: var(--primary); font-size: 0.85rem;">每 ${repeatInterval} 分钟 (最多${maxRepeat}次)</span>`;
+                repeatText = `<span style="color: var(--primary); font-size: 0.85rem;">连发 ${burstCount} 条 / 每 ${repeatInterval} 分钟 (最多${maxRepeat}轮)</span>`;
             } else {
-                repeatText = `<span style="color: var(--primary); font-size: 0.85rem;">每 ${repeatInterval} 分钟 (持续提醒)</span>`;
+                repeatText = `<span style="color: var(--primary); font-size: 0.85rem;">连发 ${burstCount} 条 / 每 ${repeatInterval} 分钟 (持续提醒)</span>`;
             }
 
             const customMsg = (rule.custom_message || '').trim();
@@ -1389,7 +1392,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (overloadRuleNameInput) overloadRuleNameInput.value = ruleToEdit.name || '';
                 if (overloadThresholdInput) overloadThresholdInput.value = ruleToEdit.threshold_current !== undefined ? ruleToEdit.threshold_current : '32.0';
                 if (overloadDurationInput) overloadDurationInput.value = ruleToEdit.duration_seconds !== undefined ? ruleToEdit.duration_seconds : 4;
-                if (overloadRepeatEnabledInput) overloadRepeatEnabledInput.checked = ruleToEdit.repeat_enabled !== false;
+                if (overloadBurstCountInput) overloadBurstCountInput.value = ruleToEdit.burst_count !== undefined ? ruleToEdit.burst_count : 5;
+                if (overloadRepeatEnabledInput) overloadRepeatEnabledInput.checked = ruleToEdit.repeat_enabled === true;
+                if (repeatSettingsRow && overloadRepeatEnabledInput) {
+                    repeatSettingsRow.style.display = overloadRepeatEnabledInput.checked ? 'grid' : 'none';
+                }
                 if (overloadRepeatIntervalInput) overloadRepeatIntervalInput.value = ruleToEdit.repeat_interval_minutes || ruleToEdit.cooldown_minutes || 10;
                 if (overloadMaxRepeatInput) overloadMaxRepeatInput.value = ruleToEdit.max_repeat_count !== undefined ? ruleToEdit.max_repeat_count : 0;
                 if (overloadCustomMsgInput) overloadCustomMsgInput.value = ruleToEdit.custom_message || '';
@@ -1403,7 +1410,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (overloadRuleNameInput) overloadRuleNameInput.value = defaultName;
                 if (overloadThresholdInput) overloadThresholdInput.value = '32.0';
                 if (overloadDurationInput) overloadDurationInput.value = '4';
-                if (overloadRepeatEnabledInput) overloadRepeatEnabledInput.checked = true;
+                if (overloadBurstCountInput) overloadBurstCountInput.value = '5';
+                if (overloadRepeatEnabledInput) overloadRepeatEnabledInput.checked = false;
+                if (repeatSettingsRow) repeatSettingsRow.style.display = 'none';
                 if (overloadRepeatIntervalInput) overloadRepeatIntervalInput.value = '10';
                 if (overloadMaxRepeatInput) overloadMaxRepeatInput.value = '0';
                 if (overloadCustomMsgInput) overloadCustomMsgInput.value = '';
@@ -1523,13 +1532,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    if (overloadRepeatEnabledInput && repeatSettingsRow) {
+        overloadRepeatEnabledInput.addEventListener('change', () => {
+            repeatSettingsRow.style.display = overloadRepeatEnabledInput.checked ? 'grid' : 'none';
+        });
+    }
+
     if (overloadModalSave) {
         overloadModalSave.addEventListener('click', () => {
             const ruleId = overloadRuleIdInput.value.trim();
             const ruleName = overloadRuleNameInput.value.trim();
             const threshold = parseFloat(overloadThresholdInput.value);
             const duration = parseInt(overloadDurationInput.value, 10);
-            const repeatEnabled = overloadRepeatEnabledInput ? overloadRepeatEnabledInput.checked : true;
+            const burstCount = overloadBurstCountInput ? (parseInt(overloadBurstCountInput.value, 10) || 5) : 5;
+            const repeatEnabled = overloadRepeatEnabledInput ? overloadRepeatEnabledInput.checked : false;
             const repeatInterval = overloadRepeatIntervalInput ? (parseInt(overloadRepeatIntervalInput.value, 10) || 10) : 10;
             const maxRepeat = overloadMaxRepeatInput ? (parseInt(overloadMaxRepeatInput.value, 10) || 0) : 0;
             const customMsg = overloadCustomMsgInput ? overloadCustomMsgInput.value.trim() : '';
@@ -1566,6 +1582,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 chargers: checkedCids,
                 threshold_current: threshold,
                 duration_seconds: isNaN(duration) ? 4 : duration,
+                burst_count: burstCount,
                 repeat_enabled: repeatEnabled,
                 repeat_interval_minutes: repeatInterval,
                 cooldown_minutes: repeatInterval,

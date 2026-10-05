@@ -599,19 +599,30 @@
 
                 <!-- Repeat Push Setting Section -->
                 <div style="background: rgba(0,0,0,0.2); padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
-                        <label style="font-size: 0.9rem; font-weight: 600; color: var(--primary); display: flex; align-items: center; gap: 0.4rem; cursor: pointer; margin: 0;">
-                            <input type="checkbox" id="overload-rule-repeat-enabled" checked> 持续超限多次重复推送
-                        </label>
-                        <span style="font-size: 0.78rem; color: var(--text-muted);">关闭则单次超限仅报警1次</span>
-                    </div>
-                    <div id="repeat-settings-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.8rem;">
                         <div class="input-group">
-                            <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.3rem;">重复推送间隔 (分钟)</label>
+                            <label style="font-size: 0.85rem; color: var(--warning); font-weight: 600; margin-bottom: 0.3rem;">⚡ 单次预警连发次数 (条)</label>
+                            <input type="number" id="overload-rule-burst-count" min="1" max="10" value="5" placeholder="例如: 5 (连发5条强提醒)" style="padding: 0.5rem 0.7rem; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--warning); font-weight: bold; outline: none;">
+                        </div>
+                        <div class="input-group" style="justify-content: center;">
+                            <span style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.3; margin-top: 1.1rem;">
+                                🔔 触发超限时连续推送多条（间隔1.2秒），以强震动/连响提醒现场管理人员。
+                            </span>
+                        </div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 0.6rem;">
+                        <label style="font-size: 0.85rem; font-weight: 600; color: var(--primary); display: flex; align-items: center; gap: 0.4rem; cursor: pointer; margin: 0;">
+                            <input type="checkbox" id="overload-rule-repeat-enabled"> 持续超限定时再次连发
+                        </label>
+                        <span style="font-size: 0.78rem; color: var(--text-muted);">关闭则单次超限仅连发1轮</span>
+                    </div>
+                    <div id="repeat-settings-row" style="display: none; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="input-group">
+                            <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.3rem;">再次提醒间隔 (分钟)</label>
                             <input type="number" id="overload-rule-repeat-interval" min="1" max="1440" value="10" style="padding: 0.5rem 0.7rem; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: white; outline: none;">
                         </div>
                         <div class="input-group">
-                            <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.3rem;">最大推送次数 (0为不限)</label>
+                            <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.3rem;">最大重复轮数 (0为不限)</label>
                             <input type="number" id="overload-rule-max-repeat" min="0" max="100" value="0" placeholder="0 = 持续提醒直至恢复" style="padding: 0.5rem 0.7rem; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: white; outline: none;">
                         </div>
                     </div>

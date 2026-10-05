@@ -114,9 +114,13 @@ default_current_overload_rules = [
         "id": "rule_main_line",
         "name": "主进线防跳闸预警 (A枪+B枪)",
         "chargers": ["charger-a", "charger-b"],
-        "threshold_current": 32.0,
-        "duration_seconds": 4,
+        "threshold_current": 155.0,
+        "duration_seconds": 5,
+        "burst_count": 5,
         "cooldown_minutes": 10,
+        "repeat_enabled": False,
+        "repeat_interval_minutes": 10,
+        "max_repeat_count": 0,
         "enabled": True,
         "notify_recovery": True
     }
@@ -500,22 +504,29 @@ def evaluate_current_overload_rules():
                     if custom_msg:
                         custom_block = f"> **📢 预警通知**:\n> <font color=\"warning\">**{custom_msg}**</font>\n\n"
 
-                    md_msg = (
-                        f"# 🚨 【主线电流过载预警】\n"
-                        f"{custom_block}"
-                        f"> **预警规则**: {rule.get('name')}\n"
-                        f"> **实时叠加最大相**: <font color=\"warning\">{current_val} A</font>\n"
-                        f"> **警戒阈值**: {threshold} A (超额 {over_percent}%)\n"
-                        f"> **分相叠加总和**: A相: {calc['phase_a']}A | B相: {calc['phase_b']}A | C相: {calc['phase_c']}A\n"
-                        f"{repeat_info}"
-                        f"> **预警时间**: {now_str}\n\n"
-                        f"**分路充电桩实时负荷:**\n"
-                        f"{chargers_text}\n\n"
-                        f"> ⚠️ **请注意主线开关及电缆发热情况，必要时采取限电措施防跳闸！**\n\n"
-                        f"{get_dashboard_links_md()}"
-                    )
+                    burst_count = max(1, min(10, int(rule.get("burst_count", 5))))
                     rule_hook = rule.get("custom_webhook", "").strip()
-                    send_wechat_webhook(md_msg, "markdown", "overload", custom_target=rule_hook if rule_hook else None)
+
+                    for burst_i in range(1, burst_count + 1):
+                        burst_tag = f"> **紧急强提醒**: <font color=\"warning\">🔔 第 {burst_i}/{burst_count} 次连发呼叫</font>\n" if burst_count > 1 else ""
+                        md_msg = (
+                            f"# 🚨 【主线电流过载预警】\n"
+                            f"{custom_block}"
+                            f"> **预警规则**: {rule.get('name')}\n"
+                            f"> **实时叠加最大相**: <font color=\"warning\">{current_val} A</font>\n"
+                            f"> **警戒阈值**: {threshold} A (超额 {over_percent}%)\n"
+                            f"> **分相叠加总和**: A相: {calc['phase_a']}A | B相: {calc['phase_b']}A | C相: {calc['phase_c']}A\n"
+                            f"{repeat_info}"
+                            f"{burst_tag}"
+                            f"> **预警时间**: {now_str}\n\n"
+                            f"**分路充电桩实时负荷:**\n"
+                            f"{chargers_text}\n\n"
+                            f"> ⚠️ **请注意主线开关及电缆发热情况，必要时采取限电措施防跳闸！**\n\n"
+                            f"{get_dashboard_links_md()}"
+                        )
+                        send_wechat_webhook(md_msg, "markdown", "overload", custom_target=rule_hook if rule_hook else None)
+                        if burst_i < burst_count:
+                            time.sleep(1.2)
         else:
             if st["is_alarming"] and enabled:
                 st["is_alarming"] = False
@@ -1209,7 +1220,8 @@ class CurrentOverloadRuleModel(BaseModel):
     threshold_current: float = 32.0
     duration_seconds: int = 4
     cooldown_minutes: int = 10
-    repeat_enabled: Optional[bool] = True
+    burst_count: Optional[int] = 5
+    repeat_enabled: Optional[bool] = False
     repeat_interval_minutes: Optional[int] = 10
     max_repeat_count: Optional[int] = 0
     custom_message: Optional[str] = ""
@@ -1265,9 +1277,10 @@ def test_current_overload_alert_api(rule_id: str, _: bool = Depends(verify_admin
     rule_hook = rule.get("custom_webhook", "").strip()
     target_info = "该规则指定独立 Webhook" if rule_hook else "主线预警专属通用通道"
 
-    repeat_info_text = f"开启 (每 {rule.get('repeat_interval_minutes', 10)} 分钟重复)" if rule.get("repeat_enabled", True) else "关闭 (单次超限仅报1次)"
-    if rule.get("repeat_enabled", True) and rule.get("max_repeat_count", 0) > 0:
-        repeat_info_text += f", 最多推送 {rule.get('max_repeat_count')} 次"
+    burst_count = max(1, min(10, int(rule.get("burst_count", 5))))
+    repeat_info_text = f"开启 (每 {rule.get('repeat_interval_minutes', 10)} 分钟再次连发)" if rule.get("repeat_enabled", False) else "关闭 (单周期仅连发1轮)"
+    if rule.get("repeat_enabled", False) and rule.get("max_repeat_count", 0) > 0:
+        repeat_info_text += f", 最多重复 {rule.get('max_repeat_count')} 轮"
 
     custom_template = rule.get("custom_message", "").strip()
     custom_msg = format_overload_custom_message(custom_template, rule, calc, current_val, threshold, 0.0, now_str, 1)
@@ -1283,11 +1296,12 @@ def test_current_overload_alert_api(rule_id: str, _: bool = Depends(verify_admin
         f"> **当前叠加总电流**: <font color=\"warning\">{current_val} A</font>\n"
         f"> **安全警戒阈值**: {threshold} A\n"
         f"> **分相叠加总和**: A相: {calc['phase_a']}A | B相: {calc['phase_b']}A | C相: {calc['phase_c']}A\n"
+        f"> **单次预警连发**: <font color=\"warning\">连续发送 {burst_count} 次强提醒 (间隔 1.2s)</font>\n"
         f"> **多次推送机制**: {repeat_info_text}\n"
         f"> **测试触发时间**: {now_str}\n\n"
         f"**参与叠加的充电桩分流详情:**\n"
         f"{chargers_text}\n\n"
-        f"> 💡 **这是一条测试推送，说明该主线预警的企业微信 Webhook 配置正常。**\n\n"
+        f"> 💡 **这是单条演示测试推送。实际触发电流超限时，将连续发送 {burst_count} 条强提醒通知！**\n\n"
         f"{get_dashboard_links_md()}"
     )
     success = send_wechat_webhook(md_msg, "markdown", "overload", custom_target=rule_hook if rule_hook else None)
