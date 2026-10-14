@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import urllib.request
 from datetime import datetime
@@ -246,62 +247,92 @@ def fetch_balance(raw_url, cid):
         add_service_log(cid, "失败", f"超时或报错: {e}")
     return None, None, None
 
+recharge_locks = {}
+
 def check_recharge(cid, raw_url):
-    val, using, payment = fetch_balance(raw_url, cid)
-    if val is None: return
-    
-    if cid not in chargers_recharge_state:
-        chargers_recharge_state[cid] = {"balance": val, "using": using}
+    lock = recharge_locks.setdefault(cid, threading.Lock())
+    if not lock.acquire(blocking=False):
+        logger.info(f"{cid} check_recharge already running, skipping concurrent call.")
         return
         
-    last_state = chargers_recharge_state[cid]
-    # Handle legacy state where it was just a float
-    if not isinstance(last_state, dict):
-        last_state = {"balance": last_state, "using": 0}
+    try:
+        val, using, payment = fetch_balance(raw_url, cid)
+        if val is None: return
         
-    last_val = last_state["balance"]
-    last_using = last_state["using"]
-    
-    if val > last_val:
-        # Ignore increase if it's a refund (using transitioned from 1 to 0)
-        # Also ignore if it was a refund that happened while we didn't track using properly
-        if last_using == 1 and using == 0:
-            logger.info(f"{cid} refund detected, ignoring top-up alert.")
-        else:
-            diff = round(val - last_val, 2)
-            actual_amount = diff
+        if cid not in chargers_recharge_state:
+            chargers_recharge_state[cid] = {"balance": val, "using": using}
+            return
             
-            # Check payment details from Tuoqiang platform to avoid deducted charging consumption
-            pay_amount = parse_payment_amount(payment)
-            if pay_amount is not None:
-                # If payment amount is >= diff and the difference is within normal short-term charging consumption (< 15元)
-                # or within small floating point variance, use the exact recharge order amount
-                if pay_amount >= diff and (pay_amount - diff) < 15.0:
-                    logger.info(f"{cid} recharge detected: raw diff={diff}, payment record={pay_amount}. Using accurate payment amount.")
-                    actual_amount = pay_amount
-                elif abs(pay_amount - diff) <= 0.05:
-                    actual_amount = pay_amount
-
-            # Clean display for integer amounts (e.g. 18 instead of 18.0)
-            if isinstance(actual_amount, float) and actual_amount.is_integer():
-                display_amount = int(actual_amount)
+        last_state = chargers_recharge_state[cid]
+        # Handle legacy state where it was just a float
+        if not isinstance(last_state, dict):
+            last_state = {"balance": last_state, "using": 0}
+            
+        last_val = last_state.get("balance", 0)
+        last_using = last_state.get("using", 0)
+        
+        if val > last_val:
+            # Ignore increase if it's a refund (using transitioned from 1 to 0)
+            if last_using == 1 and using == 0:
+                logger.info(f"{cid} refund detected, ignoring top-up alert.")
             else:
-                display_amount = actual_amount
-            
-            cname = chargers_config.get(cid, {}).get("name", cid)
-            msg = f"{cname}充值{display_amount}元"
-            send_wechat_webhook(msg, "text", "charge")
-            
-            # Save the recharge event for the next charging session record
-            if cid not in chargers_state:
-                chargers_state[cid] = {}
-            chargers_state[cid]["last_recharge"] = {
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "amount": display_amount
-            }
-            save_json(STATE_FILE, chargers_state)
-            
-    chargers_recharge_state[cid] = {"balance": val, "using": using}
+                diff = round(val - last_val, 2)
+                actual_amount = diff
+                pay_amount = parse_payment_amount(payment)
+                
+                # Check anti-duplicate / staged top-up suppression
+                now_ts = time.time()
+                last_ann = last_state.get("last_announced")
+                if last_ann:
+                    ann_time = last_ann.get("time", 0)
+                    ann_amount = last_ann.get("amount", 0)
+                    # If within 120 seconds of a previous announcement
+                    if (now_ts - ann_time) < 120:
+                        # If payment amount matches already announced amount, or current balance <= announced amount
+                        if (pay_amount and pay_amount == ann_amount) or (val <= ann_amount and abs(diff - ann_amount) > 1.0):
+                            logger.info(f"{cid} suppressing duplicate/staged recharge push for {ann_amount}元 (current val={val}, diff={diff})")
+                            chargers_recharge_state[cid]["balance"] = val
+                            chargers_recharge_state[cid]["using"] = using
+                            return
+
+                # Check payment details from Tuoqiang platform to avoid deducted charging consumption or partial staging
+                if pay_amount is not None:
+                    # If payment amount is >= diff, Tuoqiang payment record has the full recharge amount
+                    if pay_amount >= diff and (pay_amount - diff) < 60.0:
+                        logger.info(f"{cid} recharge detected: raw diff={diff}, payment record={pay_amount}. Using accurate payment amount.")
+                        actual_amount = pay_amount
+                    elif abs(pay_amount - diff) <= 0.05:
+                        actual_amount = pay_amount
+
+                # Clean display for integer amounts (e.g. 50 instead of 50.0)
+                if isinstance(actual_amount, float) and actual_amount.is_integer():
+                    display_amount = int(actual_amount)
+                else:
+                    display_amount = actual_amount
+                
+                cname = chargers_config.get(cid, {}).get("name", cid)
+                msg = f"{cname}充值{display_amount}元"
+                send_wechat_webhook(msg, "text", "charge")
+                
+                # Record this announcement for anti-duplicate / staging debouncing
+                last_state["last_announced"] = {
+                    "time": now_ts,
+                    "amount": display_amount
+                }
+                
+                # Save the recharge event for the next charging session record
+                if cid not in chargers_state:
+                    chargers_state[cid] = {}
+                chargers_state[cid]["last_recharge"] = {
+                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "amount": display_amount
+                }
+                save_json(STATE_FILE, chargers_state)
+                
+        chargers_recharge_state[cid]["balance"] = val
+        chargers_recharge_state[cid]["using"] = using
+    finally:
+        lock.release()
 
 async def poll_recharge_status_task():
     counter = 0
