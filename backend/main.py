@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import urllib.request
 from datetime import datetime
@@ -200,8 +201,33 @@ def update_energy_stats(cid, metrics):
 
 chargers_recharge_state = {}
 
+def parse_payment_amount(payment):
+    """
+    Extract exact recharge amount from Tuoqiang API payment field.
+    Example payment object:
+    {'show': True, 'time': '2026年10月15', 'opration': '充值 18.00元', 'state': '<font style="color:green">充值成功</font>', 'finished': True}
+    """
+    if not payment or not isinstance(payment, dict):
+        return None
+    if not payment.get("show"):
+        return None
+    opration = payment.get("opration", "")
+    state = payment.get("state", "")
+    # Check that it's a successful recharge
+    if ("成功" in state or payment.get("finished")) and "充值" in opration:
+        m = re.search(r'充值\s*([0-9]+(?:\.[0-9]+)?)\s*元', opration)
+        if m:
+            try:
+                amt = float(m.group(1))
+                if amt.is_integer():
+                    return int(amt)
+                return round(amt, 2)
+            except:
+                pass
+    return None
+
 def fetch_balance(raw_url, cid):
-    if not raw_url: return None, None
+    if not raw_url: return None, None, None
     url = raw_url.replace("/PublicMeter/", "/PublicMeter/state_update/id/")
     try:
         req = urllib.request.Request(url, headers={"X-Requested-With": "XMLHttpRequest"})
@@ -210,17 +236,18 @@ def fetch_balance(raw_url, cid):
         if data.get("state") == "success" and "info" in data and "dashboard" in data["info"]:
             val = data["info"]["dashboard"].get("value", 0)
             using = data["info"]["dashboard"].get("using", 0)
+            payment = data["info"].get("payment")
             add_service_log(cid, "成功", f"抓取到余额: {val}元")
-            return val, using
+            return val, using, payment
         else:
             add_service_log(cid, "失败", f"接口返回格式异常")
     except Exception as e:
         logger.error(f"Failed to fetch balance: {e}")
         add_service_log(cid, "失败", f"超时或报错: {e}")
-    return None, None
+    return None, None, None
 
 def check_recharge(cid, raw_url):
-    val, using = fetch_balance(raw_url, cid)
+    val, using, payment = fetch_balance(raw_url, cid)
     if val is None: return
     
     if cid not in chargers_recharge_state:
@@ -242,8 +269,27 @@ def check_recharge(cid, raw_url):
             logger.info(f"{cid} refund detected, ignoring top-up alert.")
         else:
             diff = round(val - last_val, 2)
+            actual_amount = diff
+            
+            # Check payment details from Tuoqiang platform to avoid deducted charging consumption
+            pay_amount = parse_payment_amount(payment)
+            if pay_amount is not None:
+                # If payment amount is >= diff and the difference is within normal short-term charging consumption (< 15元)
+                # or within small floating point variance, use the exact recharge order amount
+                if pay_amount >= diff and (pay_amount - diff) < 15.0:
+                    logger.info(f"{cid} recharge detected: raw diff={diff}, payment record={pay_amount}. Using accurate payment amount.")
+                    actual_amount = pay_amount
+                elif abs(pay_amount - diff) <= 0.05:
+                    actual_amount = pay_amount
+
+            # Clean display for integer amounts (e.g. 18 instead of 18.0)
+            if isinstance(actual_amount, float) and actual_amount.is_integer():
+                display_amount = int(actual_amount)
+            else:
+                display_amount = actual_amount
+            
             cname = chargers_config.get(cid, {}).get("name", cid)
-            msg = f"{cname}充值{diff}元"
+            msg = f"{cname}充值{display_amount}元"
             send_wechat_webhook(msg, "text", "charge")
             
             # Save the recharge event for the next charging session record
@@ -251,7 +297,7 @@ def check_recharge(cid, raw_url):
                 chargers_state[cid] = {}
             chargers_state[cid]["last_recharge"] = {
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "amount": diff
+                "amount": display_amount
             }
             save_json(STATE_FILE, chargers_state)
             
@@ -798,6 +844,10 @@ async def poll_meter_data(charger_id: str):
                         asyncio.create_task(asyncio.to_thread(send_wechat_webhook, text_msg, "text", "charge"))
                         md_msg = f"# ⚡ {cname}充电通知\n> **{cname}于{time_str}开始充电**\n> **初始表数**: {total_energy} kWh\n\n{get_dashboard_links_md()}"
                         asyncio.create_task(asyncio.to_thread(send_wechat_webhook, md_msg, "markdown", "charge"))
+                        
+                        monitor_url = settings.get("monitor_url")
+                        if monitor_url:
+                            asyncio.create_task(asyncio.to_thread(check_recharge, charger_id, monitor_url))
                 elif max_current >= 0.5:
                     st["start_counter"] += 1
                     save_json(STATE_FILE, chargers_state)
@@ -860,6 +910,10 @@ async def poll_meter_data(charger_id: str):
                         asyncio.create_task(asyncio.to_thread(send_wechat_webhook, text_msg, "text", "charge"))
                         md_msg = f"# ⚡ {cname}充电通知\n> **{cname}开始充电**\n> **初始表数**: {total_energy} kWh\n\n{get_dashboard_links_md()}"
                         asyncio.create_task(asyncio.to_thread(send_wechat_webhook, md_msg, "markdown", "charge"))
+                        
+                        monitor_url = settings.get("monitor_url")
+                        if monitor_url:
+                            asyncio.create_task(asyncio.to_thread(check_recharge, charger_id, monitor_url))
                 else:
                     # Maintain baseline, reset counters
                     if st["start_counter"] > 0 or st["idle_counter"] > 0:
@@ -929,7 +983,7 @@ async def poll_meter_data(charger_id: str):
                         monitor_url = settings.get("monitor_url")
                         if monitor_url:
                             try:
-                                final_balance, final_using = await asyncio.to_thread(fetch_balance, monitor_url, charger_id)
+                                final_balance, final_using, _ = await asyncio.to_thread(fetch_balance, monitor_url, charger_id)
                                 if final_balance is not None:
                                     balance_text = f"余额还剩{final_balance}元"
                                     # Update baseline to prevent double-counting if the refund hasn't happened yet
