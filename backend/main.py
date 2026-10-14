@@ -238,7 +238,9 @@ def fetch_balance(raw_url, cid):
             val = data["info"]["dashboard"].get("value", 0)
             using = data["info"]["dashboard"].get("using", 0)
             payment = data["info"].get("payment")
-            add_service_log(cid, "成功", f"抓取到余额: {val}元")
+            last_recorded_val = chargers_recharge_state.get(cid, {}).get("balance") if isinstance(chargers_recharge_state.get(cid), dict) else None
+            if last_recorded_val is None or val != last_recorded_val:
+                add_service_log(cid, "成功", f"抓取到余额: {val}元")
             return val, using, payment
         else:
             add_service_log(cid, "失败", f"接口返回格式异常")
@@ -335,21 +337,16 @@ def check_recharge(cid, raw_url):
         lock.release()
 
 async def poll_recharge_status_task():
-    counter = 0
     while True:
-        for cid, config in chargers_config.items():
-            url = config.get("monitor_url")
-            if not url: continue
-            
-            st = chargers_state.get(cid, {})
-            state = st.get("charge_state", "IDLE")
-            
-            # 活跃状态（充电中/待机中）每60秒抓取一次；闲置状态每 3*60=180秒 (3分钟) 抓取一次
-            if state != "IDLE" or counter % 3 == 0:
+        try:
+            for cid, config in list(chargers_config.items()):
+                url = config.get("monitor_url")
+                if not url: continue
                 await asyncio.to_thread(check_recharge, cid, url)
-                
-        await asyncio.sleep(60)
-        counter += 1
+                await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.error(f"Error in poll_recharge_status_task: {e}")
+        await asyncio.sleep(5)
 
 async def broadcast_alarm(alarm):
     dead = set()
